@@ -17,7 +17,7 @@ class Pult:
 
         self.GDA = GstDrawingArea.GstDrawingArea()  # виджет gstreamera
         self.box.pack_start(self.GDA, True, True, 0)
-
+        self.GDA.setSource()
         self.window.show_all()
 
         self.GDA.source.start()
@@ -25,7 +25,7 @@ class Pult:
         Gtk.main()
 
     def delete_event(self, widget, event, data=None):
-        self.GDA.stop()
+        self.GDA.source.stop()
         Gtk.main_quit()
 
 
