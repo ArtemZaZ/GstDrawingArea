@@ -9,7 +9,7 @@ from gi.repository import Gst, GObject, GLib
 
 class CVGstreamer:
     def __init__(self, IP='127.0.0.1', RTP_RECV_PORT=5000, RTCP_RECV_PORT=5001, RTCP_SEND_PORT=5005,
-                 codec="JPEG"):  # ip и порты по умолчанию + кодек jpeg и h264
+                 codec="JPEG", toAVS=False):  # ip и порты по умолчанию + кодек jpeg и h264
         self.cvImage = None  # Изображение, полученное из openCV
         Gst.init(sys.argv)  # Инициализация компонентов
         GObject.threads_init()
@@ -30,6 +30,7 @@ class CVGstreamer:
         self.RTCP_RECV_PORT0 = RTCP_RECV_PORT  #
         self.RTCP_SEND_PORT0 = RTCP_SEND_PORT  #
         self.player = None  # pipeline
+        self.toAVS = toAVS  # Флаг, означающий, что видео будет стримится в auto video sink
 
     def playPipe(self):
         self.initElements()  # инициализация компонентов
@@ -62,6 +63,7 @@ class CVGstreamer:
     def stop(self):  # остановка и освобождение ресурсов
         if self.player:
             self.player.set_state(Gst.State.NULL)
+            self.cvImage = None
 
     def on_error(self, bus, msg):  # прием ошибок
         err, dbg = msg.parse_error()
@@ -105,6 +107,7 @@ class CVGstreamer:
         self.caps = Gst.caps_from_string(self.VIDEO_CAPS)  # в каком формате принимать видео
 
         """ дальше идет очень странная система RTP """
+
         def pad_added_cb(rtpbin, new_pad, depay):
             sinkpad = Gst.Element.get_static_pad(depay, 'sink')
             lres = Gst.Pad.link(new_pad, sinkpad)
@@ -168,33 +171,39 @@ class CVGstreamer:
             raise RTCInternalError("videoconvert0", "Не получается создать объект videoconvert")
 
         """ CAPS AND SINK """
-        def gst_to_opencv(sample):  # создаем матрицу пикселей
-            buf = sample.get_buffer()
-            caps = sample.get_caps()
-            arr = numpy.ndarray(
-                (caps.get_structure(0).get_value('height'),
-                 caps.get_structure(0).get_value('width'),
-                 3),
-                buffer=buf.extract_dup(0, buf.get_size()),
-                dtype=numpy.uint8)
-            return arr
+        if self.toAVS:  # если приемник autovideosink
+            self.sink = Gst.ElementFactory.make("autovideosink", "sink")
+            if not self.sink:
+                raise RTCInternalError("sink", "Не получается создать объект sink")
 
-        def new_buffer(sink, data):  # callback функция, исполняющаяся при каждом приходящем кадре
-            sample = sink.emit("pull-sample")
-            arr = gst_to_opencv(sample)
-            self.cvImage = arr  # openCV image
-            return Gst.FlowReturn.OK
+        else:  # если приемник app sink
+            def gst_to_opencv(sample):  # создаем матрицу пикселей
+                buf = sample.get_buffer()
+                caps = sample.get_caps()
+                arr = numpy.ndarray(
+                    (caps.get_structure(0).get_value('height'),
+                     caps.get_structure(0).get_value('width'),
+                     3),
+                    buffer=buf.extract_dup(0, buf.get_size()),
+                    dtype=numpy.uint8)
+                return arr
 
-        """ создаем свой sink для перевода из GST в CV """
-        self.sink = Gst.ElementFactory.make("appsink", "sink")
-        if not self.sink:
-            raise RTCInternalError("sink", "Не получается создать объект sink")
+            def new_buffer(sink, data):  # callback функция, исполняющаяся при каждом приходящем кадре
+                sample = sink.emit("pull-sample")
+                arr = gst_to_opencv(sample)
+                self.cvImage = arr  # openCV image
+                return Gst.FlowReturn.OK
 
-        caps = Gst.caps_from_string("video/x-raw, format=(string){BGR, GRAY8}")  # формат приема sink'a
-        self.sink.set_property("caps", caps)
+            """ создаем свой sink для перевода из GST в CV """
+            self.sink = Gst.ElementFactory.make("appsink", "sink")
+            if not self.sink:
+                raise RTCInternalError("sink", "Не получается создать объект sink")
 
-        self.sink.set_property("emit-signals", True)
-        self.sink.connect("new-sample", new_buffer, self.sink)
+            caps = Gst.caps_from_string("video/x-raw, format=(string){BGR, GRAY8}")  # формат приема sink'a
+            self.sink.set_property("caps", caps)
+
+            self.sink.set_property("emit-signals", True)
+            self.sink.connect("new-sample", new_buffer, self.sink)
 
         """ VIDEOSCALE """
         self.videoscale0 = Gst.ElementFactory.make("videoscale", "videoscale0")  # растягиваем изображение
@@ -223,3 +232,15 @@ class CVGstreamer:
         link_ok = self.videoscale0.link(self.sink)
         if not link_ok:
             raise RTCLinkError("videoscale0", "sink")
+
+    def toAppSink(self):  # переводит изображение в AppSink
+        if self.toAVS:
+            self.toAVS = False
+            self.stop()
+            self.start()
+
+    def toAutoVideoSink(self):  # переводит изображение в auto video sink
+        if not self.toAVS:
+            self.toAVS = True
+            self.stop()
+            self.start()

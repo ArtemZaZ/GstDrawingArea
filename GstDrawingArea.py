@@ -26,18 +26,18 @@ class WaitIndicator(object):
     )
 
     CLIMIT = 1000
+    SPEED = 0.1
     NLINES = 8
 
 
 class GstDrawingArea(Gtk.DrawingArea):
     # __gsignals__ = {"expose-event": "override", "unrealize": "override"}
 
-    def __init__(self, IP="127.0.0.1", RTP_RECV_PORT0=5000, RTCP_RECV_PORT0=5001, RTCP_SEND_PORT0=5005, codec="JPEG",
-                 resolution=[640, 480], drawCallBack=defaultDraw):
+    def __init__(self, resolution=[640, 480], drawCallBack=defaultDraw):
         Gtk.DrawingArea.__init__(self)  # инициализируем родителя
         self.resolution = resolution    # начальное разрешение
         """видео:"""
-        self.source = None # GstCV.CVGstreamer(IP, RTP_RECV_PORT0, RTCP_RECV_PORT0, RTCP_SEND_PORT0, codec=codec)
+        self.source = None
         self.connect("draw", self.doDraw)   # привязка отрисовки
         self.connect("unrealize", self.doUnrealize)     # привязка освобождения ресурсов
         self.set_size_request(resolution[0], resolution[1])     # ставим разрешение на виджет
@@ -72,7 +72,7 @@ class GstDrawingArea(Gtk.DrawingArea):
 
     def on_timer(self):     # если возвращает True будет рендериться вечно, False - не рендерится
         self.queue_draw()
-        self.waitIndicatorCount = self.waitIndicatorCount + 0.1
+        self.waitIndicatorCount = self.waitIndicatorCount + WaitIndicator.SPEED
         if self.waitIndicatorCount >= WaitIndicator.CLIMIT:
             self.waitIndicatorCount = 0
         return True     #
